@@ -1,59 +1,43 @@
-use anyhow::{anyhow, bail, Context, Result};
-use async_std::{
-    io::{self, prelude::WriteExt},
-    process::{Command, Stdio},
-};
+mod hg;
+
+use crate::hg::Hg;
+use anyhow::{anyhow, Context, Result};
+use async_std::io::{self, prelude::WriteExt};
 use clap::Clap;
 use serde::Deserialize;
-use std::{
-    collections::HashMap,
-    path::{Path, PathBuf},
-};
+use std::{collections::HashMap, path::PathBuf};
 
-const BZ_API: &'static str = "https://bugzilla.mozilla.org/rest";
+const BZ_API: &str = "https://bugzilla.mozilla.org/rest";
 
 #[derive(Clap)]
 struct Opts {
-    #[clap(
-        short,
-        long,
-        default_value = "/home/mythmon/src/mozilla-unified-artifact"
-    )]
+    #[clap(short, long, default_value = ".")]
     path: PathBuf,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let opt = Opts::parse();
+    let opts = Opts::parse();
 
-    // Start a background pull
-    let pull_future = Command::new("hg")
-        .arg("-R")
-        .arg(&opt.path)
-        .arg("pull")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output();
+    let hg = Hg::new(&opts.path);
 
-    // Get draft revisions
-    let output = Command::new("hg")
-        .arg("-R")
-        .arg(&opt.path)
-        .arg("log")
-        .args(vec!["--rev", "draft() and not(obsolete())"])
-        .args(vec!["--template", "json"])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .output()
-        .await
-        .context("Failed to get list of draft revisions")?;
-
-    if !output.status.success() {
-        bail!("Mercurial error {}", String::from_utf8(output.stdout)?);
+    // Try to get up to date revisions
+    match hg.run(vec!["pull"]).await {
+        Err(err) => println!("Warning, pull failed: {}", err),
+        Ok(_) => (),
     }
 
+    // Get draft revisions
     let revs: Vec<Revision> = serde_json::from_str(
-        &String::from_utf8(output.stdout).context("Mercurial output was not utf8")?,
+        &hg.run(vec![
+            "log",
+            "--rev",
+            "draft() and not(obsolete())",
+            "--template",
+            "json",
+        ])
+        .await
+        .context("Failed to get list of draft revisions")?,
     )
     .context("Could not parse revision information")?;
 
@@ -62,8 +46,10 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    // Find any comments in the bug that indicate the draft has merged
+    // For every revision, look for a bug number in the revision and then scan
+    // that bug for any comments that indicate the draft has merged.
     let client = reqwest::Client::new();
+
     let mut prunable = vec![];
     for rev in &revs {
         if let Some(bug) = rev.bug() {
@@ -86,18 +72,6 @@ async fn main() -> Result<()> {
         }
     }
 
-    // Wait for the pull to finish
-    let pull_status = pull_future.await;
-    match pull_status {
-        Err(err) => println!("Warning, pull failed: {}", err),
-        Ok(output) if !output.status.success() => println!(
-            "Warning, pull failed: {}{}",
-            String::from_utf8(output.stdout)?,
-            String::from_utf8(output.stderr)?
-        ),
-        Ok(_) => (),
-    }
-
     // Ask to prune each revision
     let stdin = io::stdin();
     let mut stdout = io::stdout();
@@ -115,7 +89,7 @@ async fn main() -> Result<()> {
             stdin.read_line(&mut buffer).await?;
             match buffer.trim() {
                 "y" | "Y" | "" => {
-                    prune_revision(&opt.path, &local.node, &remote).await?;
+                    prune_revision(&hg, &local.node, &remote).await?;
                     break;
                 }
                 _ => (),
@@ -126,25 +100,10 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn prune_revision(path: &Path, rev: &str, succ: &str) -> Result<()> {
-    let output = Command::new("hg")
-        .arg("-R")
-        .arg(path)
-        .arg("prune")
-        .args(vec!["--rev", &rev])
-        .args(vec!["--succ", &succ])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .output()
+async fn prune_revision(hg: &Hg, rev: &str, succ: &str) -> Result<()> {
+    hg.run(vec!["prune", "--rev", &rev, "--succ", &succ])
         .await
-        .context("Failed to get list of draft revisions")?;
-    if !output.status.success() {
-        bail!(
-            "Prune failed: {}{}",
-            String::from_utf8(output.stdout)?,
-            String::from_utf8(output.stderr)?
-        )
-    }
+        .context("Failed to prune revision")?;
     Ok(())
 }
 
