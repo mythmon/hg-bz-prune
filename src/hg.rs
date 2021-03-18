@@ -126,6 +126,7 @@ impl Hg {
 #[derive(Debug, Deserialize)]
 pub struct Revision {
     /// The entire body of the revision comment
+    #[serde(rename = "desc")]
     pub description: String,
 
     /// The global identifying hash of the revision.
