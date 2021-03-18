@@ -1,5 +1,26 @@
-mod bz;
-mod hg;
+//! A tool to automate pruning Mercurial revisions that have landed in mozilla-central.
+
+#![deny(clippy::all, clippy::cargo, unsafe_code)]
+#![warn(
+    clippy::pedantic,
+    clippy::nursery,
+    missing_copy_implementations,
+    missing_crate_level_docs,
+    missing_debug_implementations,
+    missing_docs,
+    single_use_lifetimes,
+    trivial_casts,
+    trivial_numeric_casts,
+    unreachable_pub,
+    unsafe_code,
+    unused_crate_dependencies,
+    unused_import_braces,
+    unused_qualifications,
+    variant_size_differences
+)]
+
+pub mod bz;
+pub mod hg;
 
 use crate::{bz::BugStatus, hg::Hg};
 use anyhow::{Context, Result};
@@ -19,10 +40,9 @@ async fn main() -> Result<()> {
 
     let hg = Hg::new(&opts.path);
 
-    // Try to get up to date revisions
-    match hg.pull().await {
-        Err(err) => println!("Warning, pull failed: {}", err),
-        Ok(_) => (),
+    // Try to get up to date revisions, but don't fail if it doesn't work.
+    if let Err(err) = hg.pull().await {
+        println!("Warning, pull failed: {}", err);
     }
 
     // Get draft revisions
@@ -75,7 +95,7 @@ async fn main() -> Result<()> {
         println!(
             "{} {}",
             &local.hash[..12],
-            local.header().unwrap_or("<no description>")
+            local.subject().unwrap_or("<no description>")
         );
         print!("  prune to {}? ", remote);
         loop {
