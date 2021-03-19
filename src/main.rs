@@ -44,7 +44,7 @@ struct Opts {
 async fn main() -> Result<()> {
     let opts = Opts::parse();
 
-    let hg = Hg::new(&opts.path);
+    let hg = &Hg::new(&opts.path);
 
     // Try to get up to date revisions, but don't fail if it doesn't work.
     if let Err(err) = hg.pull().await {
@@ -66,8 +66,6 @@ async fn main() -> Result<()> {
     let client = reqwest::Client::new();
     // Set up a counter for how many prunable revisions are found
     let num_prunable = AtomicU32::new(0);
-    // Shadow `hg` with a reference that can be safely "moved" into the closures below.
-    let hg = &hg;
 
     // For every revision, look for a bug number in the revision and then scan
     // that bug for any comments that indicate the draft has merged.
