@@ -104,7 +104,7 @@ struct BugComments {
 
 impl<'a> ApiBug<'a> {
     const fn new(client: &'a reqwest::Client, id: String) -> Self {
-        Self { client, id }
+        Self { id, client }
     }
 
     /// Fetch the details of this bug from the API.

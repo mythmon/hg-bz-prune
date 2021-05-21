@@ -112,7 +112,7 @@ impl Hg {
     /// # Errors
     /// Returns an error if Mercurial fails to prune the revision.
     pub async fn prune(&self, rev: &str, successor: Option<&str>) -> Result<()> {
-        let mut args = vec!["prune", "--ref", rev];
+        let mut args = vec!["prune", "--rev", rev];
         if let Some(succ) = successor {
             args.push("--succ");
             args.push(succ);
